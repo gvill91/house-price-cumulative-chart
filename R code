@@ -1,0 +1,91 @@
+library(geofacet)
+library(tidyverse)
+library(data.table)
+library(extrafont)
+library(ggfx)
+library(ggtext)
+
+dt <- fread("https://www.freddiemac.com/fmac-resources/research/docs/fmhpi_master_file.csv")
+
+dt2 <- copy(dt)[GEO_Type == "State"&Year>2019
+                ][,date:=as.Date(paste(Year,Month,"01",sep = "-"))
+                  ][date>"2020-01-01"
+                    ][,cumchg:=Index_SA/first(Index_SA)-1,by=.(GEO_Name)
+                      ][,.SD[c(which.max(cumchg),.N)],by=.(GEO_Name)
+                        ]
+
+
+dt3 <- dcast(dt2,GEO_Name ~ rowid(GEO_Name), value.var = "cumchg")
+setnames(dt3,c(2,3),c("max_cumgrwth","latest"))
+
+
+
+dt4 <- dt3[order(latest),]
+
+dt5 <- copy(dt4)[,`:=`(index=rank(latest),
+                       stillrising=ifelse(max_cumgrwth==latest,T,F))
+                 ][,color:=ifelse(stillrising==F,"#08bdbd","#f21b3f"),
+                   ]
+
+dt6 <- dt5 %>%
+  mutate(state_name=glue::glue("<span style='color:{color}'>{GEO_Name}</span>"))
+
+theme_gv <- function(font="Tw Cen MT", bs=14,...){
+  theme_minimal(base_size=bs,base_family=font,...) +
+    theme(axis.text = element_text(color="grey90"),
+          panel.grid.minor = element_blank(),
+          panel.grid.major = element_line(size=0.15,colour = fm_cols("grey"),linetype=2),
+          axis.title = element_text(color="grey90"),
+          plot.margin = margin(0.5,0.1,0.5,0.5,"cm"),
+          plot.background = element_rect(fill="black", color=NA),
+          plot.title.position = "plot",
+          plot.title=element_text(size=rel(1.5),
+                                  face="bold",
+                                  hjust=0,
+                                  color="grey80",
+                                  margin=margin(0,0,5,0)),
+          plot.subtitle = element_text(size=rel(1.25),
+                                       face="italic",
+                                       hjust=0,
+                                       color="grey90"),
+          plot.caption = element_text(hjust=0,
+                                      color="grey90),
+          plot.caption.position = "plot")
+}
+
+space <- .38
+
+ggplot(dt5,aes(y=index))+
+  geom_segment(aes(x=0,xend=max_cumgrwth,yend=index,color=stillrising),
+               lineend = "round",
+               linewidth=.8)+
+  geom_segment(aes(x=max_cumgrwth,xend=max_cumgrwth, yend=ifelse(max_cumgrwth==latest,index, index-space),
+                   color=stillrising),
+               lineend = "round",
+               linewidth=.8)+
+  geom_segment(aes(x=max_cumgrwth,xend=latest,y=index-space, yend=index-space,color=stillrising),
+               lineend = "round",
+               linewidth=.8)+
+  with_inner_glow(
+    geom_point(aes(x=latest,y=ifelse(max_cumgrwth==latest,index, index-space),color=stillrising),size=2,alpha=0.9),
+    colour = "white",sigma = 5,expand = 1
+  )+ 
+  annotate("label",x=.66,y = 50.75,label="receding from peak",fill="#08bdbd",color="black",size=9/.pt,fontface="bold",alpha=1)+
+  annotate("label",x=.57,y = 48.5,label="still growing",fill="#f21b3f",color="black",size=9/.pt,fontface="bold",alpha=1)+
+  scale_color_manual(values=c("#08bdbd","#f21b3f"))+
+  hrbrthemes::scale_x_percent(breaks=seq(0,1,.1),
+                              sec.axis = dup_axis(),
+                              expand=expansion(mult=c(0,.1))
+                              )+
+  scale_y_continuous(labels=dt6$state_name,breaks=1:51*1,expand=expansion(mult=c(0.01,0.01))#,sec.axis = dup_axis()
+                     )+
+  theme_gv()+
+  theme(panel.grid.major.y = element_blank(),
+        legend.position = "none",
+        axis.text.y = element_markdown(),
+        axis.text.y.right=element_markdown())+
+  labs(title="Most States' House Prices Have Began to Turn From\nStart of Pandemic",
+       subtitle="Cumulative Growth in House Prices Since February 2020",
+       caption="Source: Freddie Mac House Price Index (SA)\n@GenaroVillaJr",
+       x="% Growth Since Feb 2020",
+       y=NULL)
